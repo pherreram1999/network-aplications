@@ -1,8 +1,17 @@
+import json
 import socket
 import threading
 from os import environ
 
-def handle_connection(conn, addr):
+from database import DatabasePool
+
+
+def openDB():
+    with open('connections.json') as connectionsJSON:
+        connections = json.load(connectionsJSON)
+        return DatabasePool(connections)
+
+def handle_connection(conn, addr,db: DatabasePool):
     print("Connection from", addr)
     while conn: # mientras la conexion siga viva
         credencialesBin = conn.recv(1024) # recibimos credenciales del usuario
@@ -33,6 +42,11 @@ def handle_connection(conn, addr):
                 break
             message = data.decode('utf-8')
             print(f'message from {user}: {message}')
+            # registramos el mensaje pool de base datos
+            db.execute(
+                'INSERT INTO messages (name, message) VALUES (?, ?)',
+                (user, message)
+            )
             # mandamos un echo
             conn.sendall(message.encode('utf-8'))
     pass
@@ -43,6 +57,9 @@ def main():
     host = environ.get('HOST') or '0.0.0.0'
     port = int(port)
 
+    dbconn = openDB()
+    dbconn.migrate() # aseguramos que exitan las tablas
+
     # creamos un socket bajo TCP
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.bind((host, port))
@@ -50,13 +67,11 @@ def main():
         print(f"Listening on {host}:{port}")
 
         server.listen() # iniciamos la servidor para escuchar conexiones
-
-
         while True:
             # mandamos a handlear la conexion a otro hilo para recibir mas conexiones
             conn, addr = server.accept()
             # mandamos la conexion a otro hilo para que maneje su propia conexion
-            thread = threading.Thread(target=handle_connection, args=(conn, addr))
+            thread = threading.Thread(target=handle_connection, args=(conn, addr, dbconn))
             thread.start() # iniciamos le ejecucion del hilo
 
 
